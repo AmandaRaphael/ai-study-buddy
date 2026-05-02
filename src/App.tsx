@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 type Message = {
@@ -11,6 +11,11 @@ type ChatSession = {
   id: number;
   messages: Message[];
   createdAt: number;
+};
+
+type StoredChatState = {
+  chats: ChatSession[];
+  activeChatId: number;
 };
 
 const starterMessages: Message[] = [
@@ -43,6 +48,7 @@ const starterMessages: Message[] = [
 ];
 
 const quickActions = ["Explain", "Quiz Me", "Summarize", "Flashcards"];
+const CHAT_STORAGE_KEY = "ai-study-buddy.chat-state";
 
 const createBlankChat = (): ChatSession => ({
   id: Date.now(),
@@ -74,15 +80,106 @@ const getChatTitle = (messages: Message[]) => {
   return firstUserMessage.content.slice(0, 40);
 };
 
+const isValidMessage = (value: unknown): value is Message => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const message = value as Record<string, unknown>;
+
+  return (
+    typeof message.id === "number" &&
+    (message.role === "user" || message.role === "ai") &&
+    typeof message.content === "string"
+  );
+};
+
+const isValidChatSession = (value: unknown): value is ChatSession => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const chat = value as Record<string, unknown>;
+
+  return (
+    typeof chat.id === "number" &&
+    typeof chat.createdAt === "number" &&
+    Array.isArray(chat.messages) &&
+    chat.messages.every(isValidMessage)
+  );
+};
+
+const loadStoredChatState = (): StoredChatState => {
+  if (typeof window === "undefined") {
+    return {
+      chats: initialChats,
+      activeChatId: initialChats[0].id,
+    };
+  }
+
+  try {
+    const storedState = window.localStorage.getItem(CHAT_STORAGE_KEY);
+
+    if (!storedState) {
+      return {
+        chats: initialChats,
+        activeChatId: initialChats[0].id,
+      };
+    }
+
+    const parsedState = JSON.parse(storedState) as Partial<StoredChatState>;
+
+    if (
+      !Array.isArray(parsedState.chats) ||
+      !parsedState.chats.every(isValidChatSession)
+    ) {
+      return {
+        chats: initialChats,
+        activeChatId: initialChats[0].id,
+      };
+    }
+
+    const chats = parsedState.chats;
+    const activeChatId =
+      typeof parsedState.activeChatId === "number" &&
+      chats.some((chat) => chat.id === parsedState.activeChatId)
+        ? parsedState.activeChatId
+        : chats[0]?.id ?? initialChats[0].id;
+
+    return {
+      chats: chats.length > 0 ? chats : initialChats,
+      activeChatId,
+    };
+  } catch {
+    return {
+      chats: initialChats,
+      activeChatId: initialChats[0].id,
+    };
+  }
+};
+
 export default function App() {
-  const [chats, setChats] = useState<ChatSession[]>(initialChats);
-  const [activeChatId, setActiveChatId] = useState<number>(initialChats[0].id);
+  const [storedState] = useState<StoredChatState>(() => loadStoredChatState());
+  const [chats, setChats] = useState<ChatSession[]>(storedState.chats);
+  const [activeChatId, setActiveChatId] = useState<number>(
+    storedState.activeChatId,
+  );
   const [input, setInput] = useState("");
 
   const activeChat =
     chats.find((chat) => chat.id === activeChatId) ??
     chats[0] ??
     createBlankChat();
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      CHAT_STORAGE_KEY,
+      JSON.stringify({
+        chats,
+        activeChatId,
+      } satisfies StoredChatState),
+    );
+  }, [chats, activeChatId]);
 
   const handleSend = () => {
     if (!input.trim()) return;
