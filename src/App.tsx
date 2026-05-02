@@ -80,6 +80,8 @@ const getChatTitle = (messages: Message[]) => {
   return firstUserMessage.content.slice(0, 40);
 };
 
+const API_BASE_URL = "http://localhost:8787";
+
 const isValidMessage = (value: unknown): value is Message => {
   if (!value || typeof value !== "object") {
     return false;
@@ -165,6 +167,8 @@ export default function App() {
     storedState.activeChatId,
   );
   const [input, setInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const activeChat =
     chats.find((chat) => chat.id === activeChatId) ??
@@ -181,7 +185,7 @@ export default function App() {
     );
   }, [chats, activeChatId]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
     const trimmedInput = input.trim();
@@ -192,20 +196,47 @@ export default function App() {
     };
 
     const chatId = activeChat.id;
+    const updatedMessages = [...activeChat.messages, newMessage];
 
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === chatId
           ? {
               ...chat,
-              messages: [...chat.messages, newMessage],
+              messages: updatedMessages,
             }
           : chat,
       ),
     );
     setInput("");
+    setErrorMessage("");
+    setIsSending(true);
 
-    setTimeout(() => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: updatedMessages,
+        }),
+      });
+
+      const responseBody = (await response.json()) as {
+        reply?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !responseBody.reply) {
+        throw new Error(
+          responseBody.error ||
+            "The assistant could not respond right now. Please try again.",
+        );
+      }
+
+      const assistantReply = responseBody.reply;
+
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === chatId
@@ -216,14 +247,22 @@ export default function App() {
                   {
                     id: Date.now() + 1,
                     role: "ai",
-                    content: `Here's a helpful explanation about: ${trimmedInput}`,
+                    content: assistantReply,
                   },
                 ],
               }
             : chat,
         ),
       );
-    }, 800);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while contacting the chat server.",
+      );
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleQuickAction = (action: string) => {
@@ -311,9 +350,19 @@ export default function App() {
                 </div>
               </div>
             ))}
+
+            {isSending ? (
+              <div className="message-row message-row-ai">
+                <div className="message-bubble message-ai">
+                  <span className="message-label">AI</span>
+                  <p className="message-content">Thinking...</p>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <div className="composer">
+            {errorMessage ? <p className="composer-error">{errorMessage}</p> : null}
             <div className="composer-row">
               <input
                 type="text"
@@ -322,14 +371,15 @@ export default function App() {
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="Type your question here..."
                 className="composer-input"
+                disabled={isSending}
               />
               <button
                 type="button"
                 onClick={handleSend}
                 className="send-button"
-                disabled={!input.trim()}
+                disabled={!input.trim() || isSending}
               >
-                Send
+                {isSending ? "Sending..." : "Send"}
               </button>
             </div>
           </div>

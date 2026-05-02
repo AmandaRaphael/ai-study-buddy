@@ -279,6 +279,13 @@
   background: linear-gradient(180deg, rgba(255, 251, 255, 0.3), rgba(246, 239, 255, 0.86));
 }
 
+.composer-error {
+  margin: 0 0 12px;
+  color: #9f1239;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
 .composer-row {
   display: flex;
   gap: 14px;
@@ -299,6 +306,11 @@
 
 .composer-input::placeholder {
   color: #8f7ea9;
+}
+
+.composer-input:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .composer-input:focus {
