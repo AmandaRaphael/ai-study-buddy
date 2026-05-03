@@ -82,6 +82,25 @@ const getChatTitle = (messages: Message[]) => {
 
 const API_BASE_URL = "http://localhost:8787";
 
+const moveChatToTop = (
+  chats: ChatSession[],
+  chatId: number,
+  updateMessages: (messages: Message[]) => Message[],
+) => {
+  const targetChat = chats.find((chat) => chat.id === chatId);
+
+  if (!targetChat) {
+    return chats;
+  }
+
+  const updatedChat: ChatSession = {
+    ...targetChat,
+    messages: updateMessages(targetChat.messages),
+  };
+
+  return [updatedChat, ...chats.filter((chat) => chat.id !== chatId)];
+};
+
 const isValidMessage = (value: unknown): value is Message => {
   if (!value || typeof value !== "object") {
     return false;
@@ -198,16 +217,7 @@ export default function App() {
     const chatId = activeChat.id;
     const updatedMessages = [...activeChat.messages, newMessage];
 
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              messages: updatedMessages,
-            }
-          : chat,
-      ),
-    );
+    setChats((prev) => moveChatToTop(prev, chatId, () => updatedMessages));
     setInput("");
     setErrorMessage("");
     setIsSending(true);
@@ -238,21 +248,14 @@ export default function App() {
       const assistantReply = responseBody.reply;
 
       setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === chatId
-            ? {
-                ...chat,
-                messages: [
-                  ...chat.messages,
-                  {
-                    id: Date.now() + 1,
-                    role: "ai",
-                    content: assistantReply,
-                  },
-                ],
-              }
-            : chat,
-        ),
+        moveChatToTop(prev, chatId, (messages) => [
+          ...messages,
+          {
+            id: Date.now() + 1,
+            role: "ai",
+            content: assistantReply,
+          },
+        ]),
       );
     } catch (error) {
       setErrorMessage(
