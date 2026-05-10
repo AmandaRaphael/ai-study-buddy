@@ -11,12 +11,16 @@ type ChatSession = {
   id: number;
   messages: Message[];
   createdAt: number;
+  summary?: string;
 };
 
 type StoredChatState = {
   chats: ChatSession[];
   activeChatId: number;
 };
+
+type ChatTab = "chat" | "summary";
+type AppPage = "home" | "learn";
 
 const starterMessages: Message[] = [
   {
@@ -81,6 +85,10 @@ const getChatTitle = (messages: Message[]) => {
 };
 
 const API_BASE_URL = "http://localhost:8787";
+const LEARN_PAGE_HASH = "#/learn";
+
+const getPageFromHash = (hash: string): AppPage =>
+  hash === LEARN_PAGE_HASH ? "learn" : "home";
 
 const moveChatToTop = (
   chats: ChatSession[],
@@ -126,7 +134,8 @@ const isValidChatSession = (value: unknown): value is ChatSession => {
     typeof chat.id === "number" &&
     typeof chat.createdAt === "number" &&
     Array.isArray(chat.messages) &&
-    chat.messages.every(isValidMessage)
+    chat.messages.every(isValidMessage) &&
+    (typeof chat.summary === "string" || typeof chat.summary === "undefined")
   );
 };
 
@@ -185,8 +194,13 @@ export default function App() {
   const [activeChatId, setActiveChatId] = useState<number>(
     storedState.activeChatId,
   );
+  const [page, setPage] = useState<AppPage>(() =>
+    typeof window === "undefined" ? "home" : getPageFromHash(window.location.hash),
+  );
+  const [activeTab, setActiveTab] = useState<ChatTab>("chat");
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const activeChat =
@@ -203,6 +217,66 @@ export default function App() {
       } satisfies StoredChatState),
     );
   }, [chats, activeChatId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncPageFromHash = () => {
+      setPage(getPageFromHash(window.location.hash));
+    };
+
+    window.addEventListener("hashchange", syncPageFromHash);
+
+    return () => window.removeEventListener("hashchange", syncPageFromHash);
+  }, []);
+
+  const goToPage = (nextPage: AppPage) => {
+    if (typeof window === "undefined") {
+      setPage(nextPage);
+      return;
+    }
+
+    const nextHash = nextPage === "learn" ? LEARN_PAGE_HASH : "";
+
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+      return;
+    }
+
+    setPage(nextPage);
+  };
+
+  const requestAssistantReply = async (
+    messages: Message[],
+    mode: "chat" | "summary",
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages,
+        mode,
+      }),
+    });
+
+    const responseBody = (await response.json()) as {
+      reply?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !responseBody.reply) {
+      throw new Error(
+        responseBody.error ||
+          "The assistant could not respond right now. Please try again.",
+      );
+    }
+
+    return responseBody.reply;
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -223,29 +297,7 @@ export default function App() {
     setIsSending(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: updatedMessages,
-        }),
-      });
-
-      const responseBody = (await response.json()) as {
-        reply?: string;
-        error?: string;
-      };
-
-      if (!response.ok || !responseBody.reply) {
-        throw new Error(
-          responseBody.error ||
-            "The assistant could not respond right now. Please try again.",
-        );
-      }
-
-      const assistantReply = responseBody.reply;
+      const assistantReply = await requestAssistantReply(updatedMessages, "chat");
 
       setChats((prev) =>
         moveChatToTop(prev, chatId, (messages) => [
@@ -269,7 +321,43 @@ export default function App() {
   };
 
   const handleQuickAction = (action: string) => {
+    if (action === "Summarize") {
+      void handleSummarize();
+      return;
+    }
+
     setInput(action + " ");
+  };
+
+  const handleSummarize = async () => {
+    const chatId = activeChat.id;
+
+    setErrorMessage("");
+    setIsSummarizing(true);
+
+    try {
+      const summary = await requestAssistantReply(activeChat.messages, "summary");
+
+      setChats((prev) =>
+        moveChatToTop(prev, chatId, (messages) => messages).map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                summary,
+              }
+            : chat,
+        ),
+      );
+      setActiveTab("summary");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while creating the summary.",
+      );
+    } finally {
+      setIsSummarizing(false);
+    }
   };
 
   const handleNewChat = () => {
@@ -277,8 +365,61 @@ export default function App() {
 
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+    setActiveTab("chat");
     setInput("");
   };
+
+  if (page === "home") {
+    return (
+      <div className="landing-shell">
+        <div className="landing-frame">
+          <div className="landing-copy">
+            <span className="landing-kicker">AI Study Buddy</span>
+            <h1>I need to learn a few things.</h1>
+            <p className="landing-lede">
+              Turn that into focused study sessions, quick quizzes, and clean
+              summaries without losing your momentum.
+            </p>
+
+            <div className="landing-actions">
+              <button
+                type="button"
+                className="landing-primary"
+                onClick={() => goToPage("learn")}
+              >
+                Open learning space
+              </button>
+              <button
+                type="button"
+                className="landing-secondary"
+                onClick={() => goToPage("learn")}
+              >
+                Start with chat
+              </button>
+            </div>
+          </div>
+
+          <div className="landing-preview" aria-label="Study buddy preview">
+            <div className="preview-card">
+              <span className="preview-label">How it helps</span>
+              <ul className="preview-list">
+                <li>Ask for explanations in plain language</li>
+                <li>Switch into quiz mode when you want recall practice</li>
+                <li>Generate summaries after each session</li>
+              </ul>
+            </div>
+
+            <div className="preview-note">
+              <span className="preview-note-title">Try prompts like:</span>
+              <p>"Explain photosynthesis like I am 12."</p>
+              <p>"Quiz me on JavaScript closures."</p>
+              <p>"Summarize my last chat into revision notes."</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -306,7 +447,10 @@ export default function App() {
                   key={chat.id}
                   type="button"
                   className={`recent-chat-item ${chat.id === activeChatId ? "recent-chat-item-active" : ""}`}
-                  onClick={() => setActiveChatId(chat.id)}
+                  onClick={() => {
+                    setActiveChatId(chat.id);
+                    setActiveTab("chat");
+                  }}
                 >
                   <span className="recent-chat-title">
                     {getChatTitle(chat.messages)}
@@ -324,6 +468,13 @@ export default function App() {
               <h1>{getChatTitle(activeChat.messages)}</h1>
               <p className="app-subtitle">Your personal AI study companion</p>
             </div>
+            <button
+              type="button"
+              className="home-link-button"
+              onClick={() => goToPage("home")}
+            >
+              Back to home
+            </button>
           </header>
 
           <section className="quick-actions" aria-label="Quick actions">
@@ -339,30 +490,62 @@ export default function App() {
             ))}
           </section>
 
-          <section className="chat-area" aria-label="Conversation">
-            {activeChat.messages.map((message) => (
-              <div
-                key={message.id}
-                className={`message-row ${message.role === "user" ? "message-row-user" : "message-row-ai"}`}
-              >
-                <div className={`message-bubble message-${message.role}`}>
-                  <span className="message-label">
-                    {message.role === "user" ? "You" : "AI"}
-                  </span>
-                  <p className="message-content">{message.content}</p>
-                </div>
-              </div>
-            ))}
-
-            {isSending ? (
-              <div className="message-row message-row-ai">
-                <div className="message-bubble message-ai">
-                  <span className="message-label">AI</span>
-                  <p className="message-content">Thinking...</p>
-                </div>
-              </div>
-            ) : null}
+          <section className="content-tabs" aria-label="Content tabs">
+            <button
+              type="button"
+              className={`content-tab ${activeTab === "chat" ? "content-tab-active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              className={`content-tab ${activeTab === "summary" ? "content-tab-active" : ""}`}
+              onClick={() => setActiveTab("summary")}
+              disabled={!activeChat.summary && !isSummarizing}
+            >
+              Summary
+            </button>
           </section>
+
+          {activeTab === "chat" ? (
+            <section className="chat-area" aria-label="Conversation">
+              {activeChat.messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`message-row ${message.role === "user" ? "message-row-user" : "message-row-ai"}`}
+                >
+                  <div className={`message-bubble message-${message.role}`}>
+                    <span className="message-label">
+                      {message.role === "user" ? "You" : "AI"}
+                    </span>
+                    <p className="message-content">{message.content}</p>
+                  </div>
+                </div>
+              ))}
+
+              {isSending ? (
+                <div className="message-row message-row-ai">
+                  <div className="message-bubble message-ai">
+                    <span className="message-label">AI</span>
+                    <p className="message-content">Thinking...</p>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : (
+            <section className="summary-area" aria-label="Summary view">
+              <div className="summary-card">
+                <span className="summary-label">Conversation summary</span>
+                <p className="summary-text">
+                  {isSummarizing
+                    ? "Building your summary..."
+                    : activeChat.summary ||
+                      "No summary yet. Use the Summarize action to generate one."}
+                </p>
+              </div>
+            </section>
+          )}
 
           <div className="composer">
             {errorMessage ? <p className="composer-error">{errorMessage}</p> : null}
@@ -374,13 +557,18 @@ export default function App() {
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="Type your question here..."
                 className="composer-input"
-                disabled={isSending}
+                disabled={isSending || isSummarizing || activeTab === "summary"}
               />
               <button
                 type="button"
                 onClick={handleSend}
                 className="send-button"
-                disabled={!input.trim() || isSending}
+                disabled={
+                  !input.trim() ||
+                  isSending ||
+                  isSummarizing ||
+                  activeTab === "summary"
+                }
               >
                 {isSending ? "Sending..." : "Send"}
               </button>

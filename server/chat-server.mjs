@@ -3,8 +3,10 @@ import { createServer } from "node:http";
 const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
-const DEVELOPER_PROMPT =
+const CHAT_PROMPT =
   "You are AI Study Buddy, a helpful study assistant. Give concise, clear educational answers.";
+const SUMMARY_PROMPT =
+  "You are AI Study Buddy. Summarize the conversation clearly using concise study notes, key takeaways, and next topics to review when useful.";
 
 const allowedOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -29,10 +31,10 @@ const collectRequestBody = async (request) => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-const buildChatCompletionMessages = (messages) => [
+const buildChatCompletionMessages = (messages, mode) => [
   {
     role: "developer",
-    content: DEVELOPER_PROMPT,
+    content: mode === "summary" ? SUMMARY_PROMPT : CHAT_PROMPT,
   },
   ...messages.map((message) => ({
     role: message.role === "user" ? "user" : "assistant",
@@ -70,6 +72,7 @@ const server = createServer(async (request, response) => {
     const rawBody = await collectRequestBody(request);
     const parsedBody = JSON.parse(rawBody);
     const messages = Array.isArray(parsedBody.messages) ? parsedBody.messages : [];
+    const mode = parsedBody.mode === "summary" ? "summary" : "chat";
 
     if (messages.length === 0) {
       sendJson(
@@ -91,7 +94,7 @@ const server = createServer(async (request, response) => {
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
-        messages: buildChatCompletionMessages(messages),
+        messages: buildChatCompletionMessages(messages, mode),
       }),
       },
     );
